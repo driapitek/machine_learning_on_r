@@ -1,0 +1,225 @@
+# Глава 4: Classification using Naive Bayes
+
+Наивный Байесовский классификатор
+
+```{r}
+library(tidyverse) # инструменты
+library(tm)        # работа с текстами
+library(SnowballC) # приведение к морфологической форме
+library(wordcloud) # визуализация текстовых обалков
+library(e1071)     # алгоритм обучения наивному байесу
+library(gmodels)   # оценка эффективности моделей
+```
+
+Данные --- СМС спам.
+
+Что хотим --- настроить фильтр, который будет классифицировать спамом является письмо или нет.
+
+## 1. Сбор данных
+
+```{r}
+sms_raw <- read_csv("source/Chapter04/sms_spam.csv")
+```
+
+## 2. Исследование и подготовка данных
+
+
+```{r}
+sms_raw %>% glimpse()
+```
+
+### 2.1. Очистка и стандартизация данных
+
+Установим предикат фактором
+```{r}
+sms_raw$type <- factor(sms_raw$type)
+
+# tidy
+sms_raw <- sms_raw %>% 
+  mutate(type = factor(type))
+```
+
+Превратим текстовые сообщения в корпус текстов
+```{r}
+sms_corpus <- VCorpus(VectorSource(sms_raw$text))
+```
+
+
+```{r}
+sms_corpus_clean <- tm_map(sms_corpus, content_transformer(tolower))   # Приведём все слова в нижний регистр
+sms_corpus_clean <- tm_map(sms_corpus_clean, removeNumbers)            # Удаляем числа
+sms_corpus_clean <- tm_map(sms_corpus_clean, removeWords, stopwords()) # Удаляем стопслова
+
+# функция для исключения пунктуационных символов
+replacePunctuation <- function(x) { as.character(gsub("[[:punct:]]+", " ", x)) }
+
+#sms_corpus_clean <- tm_map(sms_corpus_clean, replacePunctuation)
+sms_corpus_clean <- tm_map(sms_corpus_clean, removePunctuation)        # Удаляем пунктуацию
+```
+
+Ещё необходимо произвести морфологическое преобразование --- привести к одной форме глаголы, изменить окончания, и т.п.
+
+```{r}
+sms_corpus_clean <- tm_map(sms_corpus_clean, stemDocument)    # изменяем морфологическую форму слов
+
+sms_corpus_clean <- tm_map(sms_corpus_clean, stripWhitespace) # удаление лишних пробелов
+```
+
+
+### 2.2. Токенизация
+
+DTM это разреженная матрица. Разреженная, потому что нулей там встречается чаще.
+
+```{r}
+sms_dtm <- DocumentTermMatrix(sms_corpus_clean)
+```
+
+Всю предобработку можно было выполнить в рамках этой функции
+
+```{r}
+sms_dtm2 <- DocumentTermMatrix(sms_corpus, control = list(
+  tolower = TRUE,
+  removeNumbers = TRUE,
+  stopwords = TRUE,
+  removePunctuation = TRUE,
+  stemming = TRUE
+))
+```
+
+Если посмотреть на эти две таблицы, то увидим разницу в них.
+
+```{r}
+sms_dtm
+sms_dtm2
+```
+
+Различия между двумя вариантами иллюстрируют очень важный принци обработки текстовых данных:
+
+ПОСЛЕДОВАТЕЛЬНОСТЬ ОПЕРАЦИЙ ИМЕЕТ ЗНАЧЕНИЕ
+
+### 2.3. Сэмплирование данных
+
+DTM объекты похож на датафрейм, поэтому сэмплировать можно индексно.
+Так как спам и неспам представлен рандомно, то можно просто взять первые 75% выборки
+
+```{r}
+# creating training and test datasets
+sms_dtm_train <- sms_dtm[1:4169, ]
+sms_dtm_test  <- sms_dtm[4170:5559, ]
+
+# also save the labels
+sms_train_labels <- sms_raw[1:4169, ]$type
+sms_test_labels  <- sms_raw[4170:5559, ]$type
+```
+
+Убедимся, что полученные подмножества являются репрезентативными что и полный набор данных.
+
+
+```{r}
+# check that the proportion of spam is similar
+prop.table(table(sms_train_labels))
+prop.table(table(sms_test_labels))
+```
+
+И тренировочные и тестовые данные содержат равную долю спама. Это хорошо.
+
+### 2.4 Визуализация тестовых данных
+
+```{r}
+wordcloud(sms_corpus_clean, min.freq = 50, random.order = FALSE)
+```
+
+### 2.5 Создание признаков индикаторов
+
+Подготовим данные, к тому чтобы их можно было запихнуть в алгоритм.
+Сейчас слишком много слов. Избавимся от тех слов, что встречаются слишком редко
+
+Пойдём даже больше, оставим только те слова, которые встречаются как минимум пять раз
+
+```{r}
+sms_freq_words <- findFreqTerms(sms_dtm_train, 5)
+
+sms_freq_words %>% glimpse()
+```
+
+Подготовим выборки
+
+```{r}
+sms_dtm_freq_train <- sms_dtm_train[ , sms_freq_words]
+sms_dtm_freq_test <- sms_dtm_test[ , sms_freq_words]
+```
+
+Наивный байес работает с категориальными данными, а у нас численные.
+Чтобы перевести один в другой, напишем функцию, которая будет говорить «Yes», если слово встречается хотя бы один раз и «No» иначе
+
+```{r}
+convert_counts <- function(x) {
+  x <- ifelse(x > 0, "Yes", "No")
+}
+```
+
+Применяем функцию
+
+```{r}
+sms_train <- apply(sms_dtm_freq_train, MARGIN = 2, convert_counts)
+sms_test  <- apply(sms_dtm_freq_test, MARGIN = 2, convert_counts)
+```
+
+## 3. Обучаем модель
+
+Используем библиотеку, в которой есть наивный байес
+
+```{r}
+sms_classifier <- naiveBayes(sms_train, sms_train_labels)
+```
+
+## 4. Оценка эффективности модели
+
+Спрогнозируем значения на тестовой моделе
+
+```{r}
+sms_test_pred <- predict(sms_classifier, sms_test)
+```
+
+И теперь оценим эффективность.
+
+```{r}
+cross_table <- CrossTable(sms_test_pred, sms_test_labels,
+           prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
+           dnn = c('predicted', 'actual')) %>% as.data.frame()
+
+cross_table %>% 
+  as_tibble() %>% 
+  mutate(check = t.x == t.y) %>% 
+  group_by(check) %>% 
+  summarise(check_sum = sum(t.Freq)) %>% 
+  mutate(result = check_sum/sum(check_sum)) %>% 
+  filter(check == TRUE) %>% 
+  pull()
+```
+
+Получилось 97% довольно неплохой результат.
+
+## 5. Повышение эффективности модели
+
+Мы не задавали значение коэффициента Лапласа. По умолчанию в формуле он равен 0, а нам нужна хотя бы единица. Чтобы нулевые значения слов не портили предсказания в формуле Байеса.
+
+```{r}
+sms_classifier2 <- naiveBayes(sms_train, sms_train_labels, laplace = 1)
+sms_test_pred2 <- predict(sms_classifier2, sms_test)
+cross_table2 <- CrossTable(sms_test_pred2, sms_test_labels,
+           prop.chisq = FALSE, prop.c = FALSE, prop.r = FALSE,
+           dnn = c('predicted', 'actual')) %>% as.data.frame()
+
+cross_table2 %>% 
+  as_tibble() %>% 
+  mutate(check = t.x == t.y) %>% 
+  group_by(check) %>% 
+  summarise(check_sum = sum(t.Freq)) %>% 
+  mutate(result = check_sum/sum(check_sum)) %>% 
+  filter(check == TRUE) %>% 
+  pull()
+```
+
+Эффективность получилась несколько лучше.
+

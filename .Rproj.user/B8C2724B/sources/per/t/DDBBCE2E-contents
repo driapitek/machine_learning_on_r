@@ -1,0 +1,10 @@
+## Chapter 3: Classification using Nearest Neighbors
+
+### Шаг 1 --- сбор данных
+
+```{r}
+wbcd <- read.csv("wisc_bc_data.csv", stringsAsFactors = FALSE)
+```
+
+### Шаг 2 --- Exploring and preparing the data
+

@@ -1,0 +1,239 @@
+## Глава 3: Классификация методом k-NN.
+
+Метод k ближайших соседей.
+
+```{r}
+library(tidyverse) # инструменты
+library(class)     # метод KNN
+library(gmodels)   # Оценка эффективности модели
+```
+
+Данные --- результаты исследования раковых клеток.
+
+Что хотим --- по характеристикам измеряемых клеток, хотим предсказать, опухоль доброкачественная или злокачественная.
+
+### Шаг 1. Сбор данных
+
+```{r}
+wbcd <- read_csv("source/Chapter03/wisc_bc_data.csv")
+```
+
+### Шаг 2. Исследование данных
+
+```{r}
+wbcd %>% glimpse()
+```
+
+Искючим идентификатор id
+
+```{r}
+wbcd <- wbcd[-1]
+```
+
+diagnosis --- это переменная, которую мы хотим предсказать.
+
+```{r}
+wbcd %>% 
+  count(diagnosis)
+```
+
+  * B --- это доброкачественное образование (Benign)
+  * M --- злокачественное (Malignant)
+
+Трансформируем эту переменную в фактор. Эта процедура, необходима для работы многих алгоритмов.
+
+```{r}
+wbcd$diagnosis <- factor(wbcd$diagnosis, levels = c("B", "M"),
+                         labels = c("Benign", "Malignant"))
+
+# tidy:
+wbcd <- wbcd %>% 
+  mutate(
+    diagnosis = factor(diagnosis, 
+                       levels = c("B", "M"),
+                       labels = c("Benign", "Malignant"))
+  )
+```
+
+В каком соотношении представлены результаты:
+
+```{r}
+round(prop.table(table(wbcd$diagnosis)) * 100, digits = 1)
+
+# tidy:
+wbcd %>% 
+  count(diagnosis) %>% 
+  mutate(rate = n/sum(n)* 100)
+```
+
+Будем рассматривать только три параметра. Просто потому что. Посмотрим, какие у них меры положения.
+
+```{r}
+summary(wbcd[c("radius_mean", "area_mean", "smoothness_mean")])
+
+# tidy:
+wbcd %>% 
+  select(radius_mean, area_mean, smoothness_mean) %>% 
+  summary()
+```
+
+Посмотрим на графиках
+
+```{r}
+wbcd %>% 
+  select(radius_mean, area_mean, smoothness_mean) %>% 
+  pivot_longer(
+    cols = everything(),
+    names_to = "parameter",
+    values_to = "value"
+  ) %>% 
+  ggplot(aes(parameter, value)) +
+  geom_boxplot()
+```
+
+Данные нужно нормализовать. Для этого напишем функцию нормализации
+
+#### Шаг 2.1. Нормализация
+
+```{r}
+normalize <- function(x) {
+  return ((x - min(x)) / (max(x) - min(x)))
+}
+```
+
+построим нормализованное распределение признаков
+
+```{r}
+wbcd %>% 
+  select(radius_mean, area_mean, smoothness_mean) %>% 
+    pivot_longer(
+    cols = everything(),
+    names_to = "parameter",
+    values_to = "value"
+  ) %>% 
+  group_by(parameter) %>% 
+  mutate(n_value = normalize(value)) %>% 
+  ungroup() %>% 
+  ggplot(aes(parameter, n_value)) +
+  geom_boxplot()
+```
+
+Применим функцию нормализации ко всем числовым столбцам
+
+```{r}
+wbcd_n <- as.data.frame(lapply(wbcd[2:31], normalize))
+
+# tidy
+wbcd_n <- wbcd[2:length(colnames(wbcd))] %>% 
+  lapply(normalize) %>% 
+  as_tibble()
+```
+
+#### Шаг 2.2. Сэмплирование
+
+Разделим выборку на тренировочный и тестовый датасеты
+
+```{r}
+wbcd_train <- wbcd_n[1:469, ]
+wbcd_test <- wbcd_n[470:569, ]
+```
+
+Теперь тоже самое проделаем с целевой переменной
+
+```{r}
+wbcd_train_labels <- wbcd[1:469, 1] %>% pull()
+wbcd_test_labels <- wbcd[470:569, 1] %>% pull()
+```
+
+### Шаг 3. Обучение модели
+
+Как выбрать число k? Это целое искусство, но положимся на простые эвристики.
+Тренировочные данные состоят из 469 значений, можно попробовать нечётное число близкое к квадратному корню --- это 21.
+
+```{r}
+wbcd_test_pred <- knn(train = wbcd_train, 
+                      test = wbcd_test,
+                      cl = wbcd_train_labels, 
+                      k = 21)
+```
+
+
+### Шаг 4. Оценка эффективности модели
+
+```{r}
+CrossTable(x = wbcd_test_labels, 
+           y = wbcd_test_pred,
+           prop.chisq = FALSE)
+
+# wbcd_test_labels %>% as_tibble() %>% count(value)
+# wbcd_test_pred   %>% as_tibble() %>% count(value)
+```
+
+На пересечении одноимённых значений, содержатся правильно предсказанные величины, т.е.:
+Benign - Benign      = 61
+Malignant -Malignant = 37
+
+Ложно отрицательные результаты,это когда заболевания не было, но алгоритм предсказал что было:
+
+wbcd_test_labels(Benign) - wbcd_test_pred(Malignant) = 2
+
+Ложно положительные результаты,это когда заболевание было, но алгоритм предсказал что не было:
+
+wbcd_test_labels(Malignant) - wbcd_test_pred(Benign) = 0
+
+И то и другое --- ошибки, их нужно сокращать.
+
+Итого эффективность нашей модели составляет 98%, что весьма неплохо, но можно попробовать улучшить.
+
+```{r}
+cross_table <- CrossTable(x = wbcd_test_labels, 
+           y = wbcd_test_pred,
+           prop.chisq = FALSE) %>% as.data.frame()
+
+cross_table %>% 
+  as_tibble() %>% 
+  mutate(check = t.x == t.y) %>% 
+  group_by(check) %>% 
+  summarise(check_sum = sum(t.Freq)) %>% 
+  mutate(result = check_sum/sum(check_sum)) %>% 
+  filter(check == TRUE) %>% 
+  pull()
+```
+
+### Шаг 5. Повышение эффективности
+
+Попробуем применить не минимаксную нормализацию, а z-нормализацию. В R это преобразование реализовано функцией `scale()`
+
+```{r}
+wbcd_z <- as.data.frame(scale(wbcd[-1]))
+```
+
+```{r}
+wbcd_train <- wbcd_z[1:469, ]
+wbcd_test <- wbcd_z[470:569, ]
+```
+
+
+```{r}
+# re-classify test cases
+wbcd_test_pred <- knn(train = wbcd_train, 
+                      test = wbcd_test,
+                      cl = wbcd_train_labels, 
+                      k = 21)
+```
+
+```{r}
+cross_table <- CrossTable(x = wbcd_test_labels, 
+                          y = wbcd_test_pred,
+           prop.chisq = FALSE)
+
+cross_table %>% 
+  as_tibble() %>% 
+  mutate(check = t.x == t.y) %>% 
+  group_by(check) %>% 
+  summarise(check_sum = sum(t.Freq)) %>% 
+  mutate(result = check_sum/sum(check_sum)) %>% 
+  filter(check == TRUE) %>% 
+  pull()
+```
+

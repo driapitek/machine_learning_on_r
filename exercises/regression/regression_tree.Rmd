@@ -1,0 +1,161 @@
+# Глава 6: Часть 2. Regression Trees and Model Trees
+
+Деревья регрессий и деревья моделей
+
+## Справка
+
+Алгоритм CART (classification and regression tree).
+
+Деревья решений могут лучше подходить для регрессионных задач. Надо пробовать.
+
+Критерием разделения в этих деревьях служит SDR (standart deviation reduction) --- уменьшение стандартного отклонения.
+
+Вот пример того как рассчитывается SDR 
+```{r}
+tee <- c(1, 1, 1, 2, 2, 3, 4, 5, 5, 6, 6, 7, 7, 7, 7)
+at1 <- c(1, 1, 1, 2, 2, 3, 4, 5, 5)
+at2 <- c(6, 6, 7, 7, 7, 7)
+bt1 <- c(1, 1, 1, 2, 2, 3, 4)
+bt2 <- c(5, 5, 6, 6, 7, 7, 7, 7)
+
+# compute the SDR
+sdr_a <- sd(tee) - (length(at1) / length(tee) * sd(at1) + length(at2) / length(tee) * sd(at2))
+sdr_b <- sd(tee) - (length(bt1) / length(tee) * sd(bt1) + length(bt2) / length(tee) * sd(bt2))
+
+# compare the SDR for each split
+sdr_a
+sdr_b
+```
+
+
+
+## Шаг 1. Сбор данных
+
+```{r}
+library(tidyverse)
+
+wine <- read.csv("source/Chapter06/whitewines.csv")
+
+wine %>% glimpse()
+```
+
+Данные --- белые вина Виньо Верде
+
+Что хотим --- предсказывать оценку вина.
+
+## Шаг 2. Исследование и подготовка данных
+
+```{r}
+hist(wine$quality)
+
+wine %>% 
+  count(quality)
+
+wine %>% 
+  ggplot(aes(quality)) +
+  #geom_histogram()
+  geom_boxplot()
+
+summary(wine)
+```
+
+Разделим выборку
+
+```{r}
+wine_train <- wine[1:3750, ]
+wine_test <- wine[3751:4898, ]
+```
+
+## Шаг 3. Обучение модели
+
+Построение модели осуществляется функцией `rpart()`
+
+```{r}
+library(rpart)
+m.rpart <- rpart(quality ~ ., data = wine_train)
+```
+
+В выдаче модели есть много подробной информации о разделении. Например самым важным признаком является алкоголь. 
+
+```{r}
+summary(m.rpart)
+```
+
+
+Но мы попробуем визуализировать полученное дерево
+
+```{r}
+library(rpart.plot)
+
+rpart.plot(m.rpart, digits = 3)
+```
+
+Чуть более симпатичная выдача:
+```{r}
+rpart.plot(m.rpart, digits = 4, fallen.leaves = TRUE, type = 3, extra = 101)
+```
+
+Полученное дерево фактически пошаговая инструкция определения оценки из имеющихся параметров.
+Теперь оценим, на сколько модель хорошо предсказывает
+
+## Шаг 4. Определение эффективности модели
+
+```{r}
+p.rpart <- predict(m.rpart, wine_test)
+```
+
+## Шаг 5. Повышение эффективности модели
+
+улучшать будем при помощи алгоритма дерева моделей, который являктся более сложной реализаций деревьев для числового прогнозирования.
+
+Алгоритм называется Cubist
+
+Функция обучения не поддерживает формулы R, поэтому синтаксис выглядит немного по другому.
+
+В x --- все предикторы, в y --- предикант
+
+```{r}
+library(Cubist)
+m.cubist <- cubist(x = wine_train[-12], y = wine_train$quality)
+```
+
+Базовая информация о дереве 
+```{r}
+# display basic information about the model tree
+m.cubist
+
+# display the tree itself
+summary(m.cubist)
+```
+
+Алгоритм сформировал 25 правил для моделирования качества вина.
+
+Ключевым отличием этого дерева от предыдущих результатов, полученных с помощь регрессионного дерева, заключается в том, что здесь узлы заканчиваются не числовым прогнозом, а линейной моделью.
+
+Проверим качество модели
+
+```{r}
+# функция средней абсолютной ошибки
+MAE <- function(actual, predicted) {
+  mean(abs(actual - predicted))  
+}
+```
+
+
+```{r}
+# generate predictions for the model
+p.cubist <- predict(m.cubist, wine_test)
+
+# summary statistics about the predictions
+summary(p.cubist)
+
+# correlation between the predicted and true values
+cor(p.cubist, wine_test$quality)
+
+
+MAE(wine_test$quality, p.cubist)
+
+```
+
+
+

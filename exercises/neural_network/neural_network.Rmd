@@ -1,0 +1,219 @@
+# Глава 7: Часть 1. Нейронные сети.
+
+# Шаг 1. Сбор данных
+
+```{r}
+library(tidyverse)
+
+concrete <- read.csv("source/Chapter07/concrete.csv")
+
+concrete %>% glimpse()
+```
+
+Данные --- данные о прочности бетона на сжатие
+
+Что хотим --- предсказывать прочность бетона.
+
+# Шаг 2. Исследование и подготовка данных
+
+Нейронные сети лучше работают с нормализованными данными.
+
+```{r}
+
+```
+
+Если данные распределены нормально, то лучше использовать scale(), если данные распределены равномерно или сильно отличаются от нормального, то лучше использовать мини-максную нормализацию. Посмотрим как случай у нас
+
+```{r}
+concrete %>% 
+  pivot_longer(cols = everything(),
+               names_to = "feature",
+               values_to = "value") %>% 
+  ggplot(aes(value)) +
+  geom_histogram() +
+  facet_wrap(~feature, scales = "free")
+```
+
+Данные у нас распределены не нормально, поэтому лучше использовать мини-максную нормализацию.
+
+```{r}
+# мини-максная нормализация
+normalize <- function(x) { 
+  return((x - min(x)) / (max(x) - min(x)))
+}
+```
+
+Применим нормализацию к каждому параметру
+
+```{r}
+# concrete_norm <- as.data.frame(lapply(concrete, normalize))
+
+# такой же код но через map()
+
+concrete_norm <- map(concrete, normalize) %>% 
+  as.data.frame()
+```
+
+проверим, правильно ли отработала функция
+
+```{r}
+concrete_norm %>% summary()
+```
+
+Правильно --- минимум всегда 0, максимум всегда 1
+
+## ВАЖНО
+
+Любоу преобразование с данными до обучения, должно быть произведено в обратном порядке после обучения, чтобы преобразовать признак назад в исходные единицы измерения.
+
+## Продолжение
+
+Разделим данные на тренировочные (75%) и тестовые (25%). Так как данные в исходном датасете отсортированы в случайном порядке, упростим себе задачу.
+
+```{r}
+concrete_train <- concrete_norm[1:773, ]
+concrete_test <- concrete_norm[774:1030, ]
+```
+
+
+# Шаг 3. Обучение модели
+
+Будем использовать многослуйную нейронку прямого распространения. Пользоваться будем пакетом `neuralnet`
+
+Начнём с простейшей модели, которая имеет один узел.
+
+```{r}
+library(neuralnet)
+
+set.seed(12345) # to guarantee repeatable results
+concrete_model <- neuralnet(formula = strength ~ cement + slag +
+                              ash + water + superplastic + 
+                              coarseagg + fineagg + age,
+                            data = concrete_train,
+                            act.fct = "logistic", # функция активации
+                            hidden = 1            # скрытые слои
+                            )
+```
+
+Очень удобно, что в этом пакете можно сразу строить топологию нейронки
+
+```{r}
+plot(concrete_model)
+```
+
+В общем случае, нейронка с одним скрытым узлом является «родственницей» линейной регрессии. Веса всех узлов подобны бэта-коэффам линейной регрессии
+
+Давайте разберём немного что у нас получилось:
+  * Сначала идут восемь входных узлов для каждого из восьми признаков
+  * потом идёт один скрытый узел
+  * Потом идёт выходной узел, который и даёт прогнозное значение.
+  * Синими стрелками (единицами) показана величина смещения для каждого из узлов. Она работает примерно как сдвиг в линейном уравнении.
+  * В нижней части рисунка показано количество шагов обучения и величина ошибки --- суммарная среднеквадратичная ошибка (SSE, Sum of Squared Errors), которая является суммой квадратов разностей между прогнозируемым и фактическим значением. 
+  * Чем меньше SSE тем точнее модель. Но это мало говорит о реальной оценке модели.
+  
+# Шаг 4. Оценка эффективности модели.
+
+Сгенерируем прогнозы.
+
+```{r}
+model_results <- compute(concrete_model, concrete_test[1:8])
+```
+
+Функция compute() работает немного иначе чем predict(). Чтобы получить прогнозы, нужно сделать следующее:
+
+```{r}
+predicted_strength <- model_results$net.result
+```
+
+Как обычно посмотрим, на корреляцию предсказаний и реальных значений. Это косвенная оценка, но по ней уже можно понять, хорошо ли наша модель отрабатывает
+
+```{r}
+cor(predicted_strength, concrete_test$strength)
+```
+
+В принципе неплохо, и это всего-то с одним скрытым узлом. Давайте попробуем улучшить модель, добавив скрытых узлов.
+
+```{r}
+
+```
+
+# Шаг 5. Повышение качества модели
+
+## Добавление скрытых слоёв
+
+```{r}
+set.seed(12345) # to guarantee repeatable results
+concrete_model2 <- neuralnet(strength ~ cement + slag +
+                               ash + water + superplastic + 
+                               coarseagg + fineagg + age,
+                               data = concrete_train, 
+                             hidden = 5)
+
+plot(concrete_model2)
+
+# evaluate the results as we did before
+model_results2 <- compute(concrete_model2, concrete_test[1:8])
+predicted_strength2 <- model_results2$net.result
+cor(predicted_strength2, concrete_test$strength)
+```
+
+Результат стал неплохо так лучше.
+
+## Изменение функции активации
+
+Пойдём ещё немного дальше. Теперь поэкспериментируем с функцией активации. Одной из лучших функций активации на данный момент является ректификатор --- линейный выпрямитель (Rectified Linear Unit, ReLU).
+
+Но эта функция линейна и её, как мы помним нельзя подсунуть в neuralnet(), потому что её невозможно дифферинцировать. Поэтому мы будем использовать сглаженную апроксимацию этой функции `SmoothReLU`, которая определяется как $$log(1 + e^{x})$$
+
+```{r}
+softplus <- function(x) { log(1 + exp(x)) }
+```
+
+
+```{r}
+set.seed(12345) # to guarantee repeatable results
+concrete_model3 <- neuralnet(strength ~ cement + slag +
+                               ash + water + superplastic + 
+                               coarseagg + fineagg + age,
+                             data = concrete_train, hidden = c(5, 5), 
+                             act.fct = softplus)
+
+# plot the network
+plot(concrete_model3)
+
+# evaluate the results as we did before
+model_results3 <- compute(concrete_model3, concrete_test[1:8])
+predicted_strength3 <- model_results3$net.result
+cor(predicted_strength3, concrete_test$strength)
+
+# note that the predicted and actual values are on different scales
+strengths <- data.frame(
+  actual = concrete$strength[774:1030],
+  pred = predicted_strength3
+)
+
+head(strengths, n = 3)
+
+# this doesn't change the correlations (but would affect absolute error)
+cor(strengths$pred, strengths$actual)
+```
+
+Благодаря этим усилиям удалось достигнуть вполне неплохого результата.
+
+Теперь для того чтобы получить обратно оценку в исходных величинах, нужно проделать процедуру обратную нормализации.
+
+```{r}
+# create an unnormalize function to reverse the normalization
+unnormalize <- function(x) { 
+  return((x * (max(concrete$strength)) -
+          min(concrete$strength)) + min(concrete$strength))
+}
+
+strengths$pred_new <- unnormalize(strengths$pred)
+strengths$error <- strengths$pred_new - strengths$actual
+
+head(strengths, n = 3)
+
+cor(strengths$pred_new, strengths$actual)
+```
+

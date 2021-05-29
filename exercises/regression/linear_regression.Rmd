@@ -1,4 +1,4 @@
-# Глава 5: Часть 1. Rule Learners
+# Глава 6: Часть 1. Linear Regression
 
 Линейная регрессия
 

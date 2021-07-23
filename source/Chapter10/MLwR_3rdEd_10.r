@@ -13,6 +13,8 @@ sms_results <- data.frame(actual_type = sms_test_labels,
                           prob_spam = round(sms_test_prob[ , 2], 5),
                           prob_ham = round(sms_test_prob[ , 1], 5))
 
+sms_results %>% as_tibble()
+
 # uncommenet this line to output the sms_results to CSV
 # write.csv(sms_results, "sms_results.csv", row.names = FALSE)
 

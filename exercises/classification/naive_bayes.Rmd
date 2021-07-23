@@ -19,6 +19,7 @@ library(gmodels)   # оценка эффективности моделей
 
 ```{r}
 sms_raw <- read_csv("source/Chapter04/sms_spam.csv")
+sms_raw <- read.csv("source/Chapter04/sms_spam.csv", stringsAsFactors = FALSE)
 ```
 
 ## 2. Исследование и подготовка данных

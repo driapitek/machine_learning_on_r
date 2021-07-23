@@ -1,0 +1,34 @@
+Для работы в этой главе запусти naive_bayes.Rmd
+
+```{r}
+# obtain the predicted probabilities
+sms_test_prob <- predict(sms_classifier, sms_test, type = "raw")
+head(sms_test_prob)
+
+# combine the results into a data frame
+sms_results <- data.frame(actual_type = sms_test_labels,
+                          predict_type = sms_test_pred,
+                          prob_spam = round(sms_test_prob[ , 2], 5),
+                          prob_ham = round(sms_test_prob[ , 1], 5))
+
+sms_results %>% as_tibble()
+```
+
+Иллюстарция того, что модель может ошибаться
+
+```{r}
+# test cases where the model is less confident
+head(subset(sms_results, prob_spam > 0.40 & prob_spam < 0.60))
+
+# test cases where the model was wrong
+head(subset(sms_results, actual_type != predict_type))
+```
+
+
+## Анализ матрицы несоответствий
+
+```{r}
+# specifying vectors
+table(sms_results$actual_type, sms_results$predict_type)
+```
+

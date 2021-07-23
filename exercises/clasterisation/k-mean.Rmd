@@ -1,0 +1,149 @@
+# Глава 9: Кластеризация методом k-mean
+
+
+## Шаг 1. Сбор данных
+
+```{r}
+library(tidyverse)
+
+teens <- read.csv("source/Chapter09/snsdata.csv", stringsAsFactors = TRUE) %>% as_tibble()
+
+teens %>% glimpse()
+```
+
+Данные --- пользователи (подростки) соцсетей
+
+Что хотим --- сегментировать пользователей
+
+## Шаг 2. Исследование и подготовка данных
+
+```{r}
+teens %>% 
+  count(gender)
+```
+
+Тут можно заметить, что женщин почти в 4 раза больше чем мужчин.
+
+Проверим где ещё есть NA
+
+```{r}
+teens %>% 
+  summary()
+```
+
+Пропушенные значения есть ещё в возрасте.
+
+Поработаем с возрастом. Согласно выводу `summary()`, есть возраст менее 13 и больше 20 (106 лет). Заменим эти данные на NA
+
+```{r}
+teens <- teens %>% 
+  mutate(age = ifelse(age >= 13 & age < 20,
+                     age, NA_integer_))
+
+teens$age %>% summary()
+```
+
+Теперь всё ок. Подумаем что делать с пропусками.
+
+### Замена пропусков в номинативных прееменных
+
+Просто так отфильтровать не вариант --- загубим много вероятно полезных данных. Перекодируем их в dummy-переменные
+
+```{r}
+teens$female <- ifelse(teens$gender == "F" & !is.na(teens$gender), 1, 0)
+teens$no_gender <- ifelse(is.na(teens$gender), 1, 0)
+```
+
+### Подстановка пропусков в числовых прееменных
+
+Действуем так --- нам известен год окончания школы, поэтому заменим пропущенные значения средним возрастом по году окончания школы.
+
+
+```{r}
+teens %>% 
+  group_by(gradyear) %>% 
+  summarise(age = mean(age, na.rm = TRUE))
+  
+```
+
+Год окончания по году отличается от среднего значения, значит наша уловка плюс-минус имеет право на жизнь.
+
+```{r}
+teens <- teens %>% 
+  group_by(gradyear) %>% 
+  mutate(new_age = mean(age, na.rm = TRUE),
+         age = ifelse(is.na(age), new_age, age)) %>% 
+  ungroup() %>% 
+  select(-new_age)
+```
+
+
+## Шаг 3. Обучение модели
+
+### Отбор признаков
+
+Возьмём для анализа только интересы пользователей
+
+```{r}
+interests <- teens[5:40]
+interests_z <- as.data.frame(lapply(interests, scale))
+
+interests_z <- as.data.frame(lapply(interests, scale))
+
+summary(interests$basketball)
+summary(interests_z$basketball)
+```
+
+### Выбор числа кластеров
+
+Число класстеров штука всегда уникальная и творческая.
+
+Так как это данные по подросткам, то мы, как в классическом голливудском кинчике про подростков, для нашего эксперимента выделим пять архетипов:
+
+  * умник
+  * спортсмен
+  * принцесса
+  * преступник
+  * безнадёжный случай
+  
+```{r}
+set.seed(2345)
+teen_clusters <- kmeans(interests_z, 5)
+```
+
+
+## Шаг 4. Определение эффективности модели
+
+Сколько значений попало в каждый кластер
+
+```{r}
+teen_clusters$size
+```
+
+У нас есть одна очень большая группа, нужно исследовать, почему получилась такая здоровая группа
+
+```{r}
+# look at the cluster centers
+teen_clusters$centers
+```
+
+## Шаг 5. Повышение эффективности модели
+
+```{r}
+teens$cluster <- teen_clusters$cluster
+
+# look at the first five records
+teens[1:5, c("cluster", "gender", "age", "friends")]
+
+# mean age by cluster
+aggregate(data = teens, age ~ cluster, mean)
+
+# proportion of females by cluster
+aggregate(data = teens, female ~ cluster, mean)
+
+# mean number of friends by cluster
+aggregate(data = teens, friends ~ cluster, mean)
+```
+
+
+
